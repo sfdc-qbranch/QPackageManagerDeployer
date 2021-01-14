@@ -16,7 +16,7 @@ import {
     putLead,
     getAllPooledOrgIDs
 } from '../lib/redisNormal';
-import { deployMsgBuilder } from '../lib/deployMsgBuilder';
+import { deployMsgFromExpressReq, deployMsgFromAPI } from '../lib/deployMsgBuilder';
 import { utilities } from '../lib/utilities';
 import { getPoolKey } from '../lib/namedUtilities';
 import { multiTemplateURLBuilder } from '../lib/multiTemplateURLBuilder';
@@ -48,9 +48,7 @@ function wrapAsync(fn: any) {
     };
 }
 
-const commonDeploy = async (req, url: string) => {
-    const message: DeployRequest = await deployMsgBuilder(req);
-
+const handleDeployRequest = async (message: DeployRequest, url: string) => {
     if (message.visitor && !message.noPool) {
         message.visitor.pageview(url).send();
         message.visitor.event('Repo', getPoolKey(message, '-')).send();
@@ -72,9 +70,13 @@ const commonDeploy = async (req, url: string) => {
 app.post(
     '/trial',
     wrapAsync(async (req, res, next) => {
-        const [message] = await Promise.all([commonDeploy(req, '/trial'), putLead(req.body)]);
+        const [message] = await Promise.all([
+            handleDeployRequest(await deployMsgFromExpressReq(req), '/trial'),
+            putLead(req.body)
+        ]);
+        // const [message] = await Promise.all([commonDeploy(req, '/trial'), putLead(req.body)]);
         logger.debug('trial request', message);
-        res.redirect(`/#deploying/trial/${message.deployId.trim()}`);
+        res.redirect(`/#deploying/trial/${message.deployId}`);
     })
 );
 
@@ -94,8 +96,17 @@ app.get(
             return res.redirect(multiTemplateURLBuilder(req.query.template, '/#userinfo'));
         }
 
-        const message = await commonDeploy(req, '/launch');
-        return res.redirect(`/#deploying/deployer/${message.deployId.trim()}`);
+        const message = await handleDeployRequest(await deployMsgFromExpressReq(req), '/launch');
+        return res.redirect(`/#deploying/deployer/${message.deployId}`);
+    })
+);
+
+app.post(
+    '/launch',
+    wrapAsync(async (req, res, next) => {
+        // const message = await commonDeploy(req, '/launch');
+        const message = await handleDeployRequest(await deployMsgFromAPI(req.body), '/launch');
+        res.send({ deployId: message.deployId });
     })
 );
 
@@ -186,9 +197,8 @@ app.get(
 app.get(
     '/token',
     wrapAsync(async (req, res, next) => {
-        console.log(`req.query`, req.query);
         const state = JSON.parse(req.query.state);
-        console.log(`state`, state);
+        // console.log(`state`, state);
         const byooOauth2 = new jsforce.OAuth2({
             redirectUri: processWrapper.BYOO_CALLBACK_URI ?? `http://localhost:${port}/token`,
             clientId: processWrapper.BYOO_CONSUMERKEY,
@@ -198,9 +208,8 @@ app.get(
         const conn = new jsforce.Connection({ oauth2: byooOauth2 });
         const userinfo = await conn.authorize(req.query.code);
 
-        // put the request in the queue
-        const message = await commonDeploy(
-            {
+        const message = await handleDeployRequest(
+            await deployMsgFromExpressReq({
                 query: {
                     template: state.template
                 },
@@ -210,43 +219,11 @@ app.get(
                     username: userinfo.id,
                     orgId: userinfo.organizationId
                 }
-            },
+            }),
             'byoo'
         );
+
         return res.redirect(`/#deploying/deployer/${message.deployId.trim()}`);
-    })
-);
-
-//Q Branch extra endpoints
-app.get(
-    '/qdeploy',
-    wrapAsync(async (req, res, next) => {
-        console.log(`req.headers:`, req.headers);
-        console.log(`req.query:`, req.query);
-        const message = await commonDeploy(
-            {
-                query: {
-                    template: req.query.template
-                },
-                byoo: {
-                    accessToken: req.headers.orgauthorization,
-                    instanceUrl: req.headers.instanceurl
-                }
-            },
-            'byoo'
-        );
-        console.log(`message:`, message);
-        return res.json({
-            deployJobId: message.deployId
-        });
-    })
-);
-
-app.get(
-    '/qdeploy/results/:deployId',
-    wrapAsync(async (req, res, next) => {
-        const results = await cdsRetrieve(req.params.deployId);
-        res.send(results);
     })
 );
 

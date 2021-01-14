@@ -56,15 +56,18 @@ const prepOrgInit = async (msgJSON: DeployRequest): Promise<void> => {
     );
 
     for (const path of paths) {
-        if (isByoo(msgJSON) && fs.existsSync(path.replace('orginit', 'byooInit'))) {
-            // it's byoo and you have a special byoo file that supercedes orgInit.sh
-            await fs.copyFile(path.replace('orginit', 'byooInit'), path);
+        if (isByoo(msgJSON) && fs.existsSync(path.replace('orgInit', 'byooInit'))) {
+            // it's byoo and you have a special byoo init file that supercedes the normal orgInit.sh
+            // so copy that file into the default location
+            logger.debug(`found byoo file.  Replacing ${path}`);
+            await fs.copyFile(path.replace('orgInit', 'byooInit'), path);
         }
         if (!fs.existsSync(path)) {
             // there is no init file, so we'll create a default one
             logger.debug(`deployQueueCheck: no orgInit.sh for ${path}.  Will use default`);
             await fs.writeFile(path, orgInitDefault);
         }
+        logger.debug(`init file ready at ${path}`);
     }
 };
 
